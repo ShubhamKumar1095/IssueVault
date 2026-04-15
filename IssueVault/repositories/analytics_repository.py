@@ -1,4 +1,4 @@
-"""Analytics and dashboard DB queries."""
+"""Analytics and dashboard DB queries (SQLite)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ class AnalyticsRepository(BaseRepository):
                 (SELECT COUNT(*)
                  FROM issue_status_history
                  WHERE new_status = 'Resolved'
-                   AND changed_at >= TRUNC(SYSDATE, 'IW')) AS resolved_this_week,
+                   AND date(changed_at) >= date('now', '-' || ((CAST(strftime('%w', 'now') AS INTEGER) + 6) % 7) || ' days')
+                ) AS resolved_this_week,
 
                 (SELECT ROUND(AVG(resolution_minutes), 2)
                  FROM resolutions) AS avg_resolution_minutes,
@@ -27,7 +28,7 @@ class AnalyticsRepository(BaseRepository):
                 (
                     SELECT CASE
                            WHEN resolved_count = 0 THEN 0
-                           ELSE ROUND((reopened_count / resolved_count) * 100, 2)
+                           ELSE ROUND((1.0 * reopened_count / resolved_count) * 100, 2)
                            END
                     FROM (
                         SELECT
@@ -40,7 +41,6 @@ class AnalyticsRepository(BaseRepository):
                 (SELECT COUNT(*)
                  FROM linked_issues
                  WHERE link_type = 'duplicate') AS duplicate_issues_avoided
-            FROM dual
         """
         row = self.fetch_one(query)
         return row or {}
@@ -58,35 +58,29 @@ class AnalyticsRepository(BaseRepository):
     def get_top_recurring_categories(self, top_n: int = 5) -> list[dict[str, object]]:
         """Return categories with highest recurrence and volume."""
         query = """
-            SELECT *
-            FROM (
-                SELECT
-                    ic.category_name,
-                    COUNT(DISTINCT i.issue_id) AS issue_count,
-                    COUNT(li.link_id) AS recurring_links
-                FROM issues i
-                JOIN issue_categories ic ON ic.category_id = i.category_id
-                LEFT JOIN linked_issues li
-                    ON li.issue_id = i.issue_id
-                   AND li.link_type = 'recurring'
-                GROUP BY ic.category_name
-                ORDER BY recurring_links DESC, issue_count DESC, ic.category_name
-            )
-            WHERE ROWNUM <= :top_n
+            SELECT
+                ic.category_name,
+                COUNT(DISTINCT i.issue_id) AS issue_count,
+                COUNT(li.link_id) AS recurring_links
+            FROM issues i
+            JOIN issue_categories ic ON ic.category_id = i.category_id
+            LEFT JOIN linked_issues li
+                ON li.issue_id = i.issue_id
+               AND li.link_type = 'recurring'
+            GROUP BY ic.category_name
+            ORDER BY recurring_links DESC, issue_count DESC, ic.category_name
+            LIMIT :top_n
         """
         return self.fetch_all(query, {"top_n": top_n})
 
     def get_top_affected_modules(self, top_n: int = 5) -> list[dict[str, object]]:
         """Return modules with highest issue counts."""
         query = """
-            SELECT *
-            FROM (
-                SELECT module_name, COUNT(*) AS issue_count
-                FROM issues
-                GROUP BY module_name
-                ORDER BY issue_count DESC, module_name
-            )
-            WHERE ROWNUM <= :top_n
+            SELECT module_name, COUNT(*) AS issue_count
+            FROM issues
+            GROUP BY module_name
+            ORDER BY issue_count DESC, module_name
+            LIMIT :top_n
         """
         return self.fetch_all(query, {"top_n": top_n})
 
@@ -94,12 +88,12 @@ class AnalyticsRepository(BaseRepository):
         """Return daily average resolution times."""
         query = """
             SELECT
-                TRUNC(resolved_at) AS resolved_date,
+                date(resolved_at) AS resolved_date,
                 ROUND(AVG(resolution_minutes), 2) AS avg_resolution_minutes,
                 COUNT(*) AS resolved_count
             FROM resolutions
-            WHERE resolved_at >= (SYSTIMESTAMP - NUMTODSINTERVAL(:days, 'DAY'))
-            GROUP BY TRUNC(resolved_at)
+            WHERE datetime(resolved_at) >= datetime('now', '-' || :days || ' days')
+            GROUP BY date(resolved_at)
             ORDER BY resolved_date
         """
         return self.fetch_all(query, {"days": days})
@@ -107,22 +101,19 @@ class AnalyticsRepository(BaseRepository):
     def get_most_helpful_solutions(self, top_n: int = 5) -> list[dict[str, object]]:
         """Return top helpful resolutions by feedback."""
         query = """
-            SELECT *
-            FROM (
-                SELECT
-                    i.issue_id,
-                    i.title,
-                    i.module_name,
-                    ROUND(NVL(AVG(sf.rating), 0), 2) AS avg_rating,
-                    COUNT(sf.feedback_id) AS feedback_count,
-                    SUM(CASE WHEN sf.is_helpful = 'Y' THEN 1 ELSE 0 END) AS helpful_votes
-                FROM issues i
-                JOIN resolutions r ON r.issue_id = i.issue_id
-                LEFT JOIN solution_feedback sf ON sf.resolution_id = r.resolution_id
-                GROUP BY i.issue_id, i.title, i.module_name
-                ORDER BY avg_rating DESC, helpful_votes DESC, feedback_count DESC
-            )
-            WHERE ROWNUM <= :top_n
+            SELECT
+                i.issue_id,
+                i.title,
+                i.module_name,
+                ROUND(COALESCE(AVG(sf.rating), 0), 2) AS avg_rating,
+                COUNT(sf.feedback_id) AS feedback_count,
+                COALESCE(SUM(CASE WHEN sf.is_helpful = 'Y' THEN 1 ELSE 0 END), 0) AS helpful_votes
+            FROM issues i
+            JOIN resolutions r ON r.issue_id = i.issue_id
+            LEFT JOIN solution_feedback sf ON sf.resolution_id = r.resolution_id
+            GROUP BY i.issue_id, i.title, i.module_name
+            ORDER BY avg_rating DESC, helpful_votes DESC, feedback_count DESC
+            LIMIT :top_n
         """
         return self.fetch_all(query, {"top_n": top_n})
 
@@ -134,15 +125,15 @@ class AnalyticsRepository(BaseRepository):
                 SUM(d.created_count) AS created_count,
                 SUM(d.resolved_count) AS resolved_count
             FROM (
-                SELECT TRUNC(created_at) AS activity_date, COUNT(*) AS created_count, 0 AS resolved_count
+                SELECT date(created_at) AS activity_date, COUNT(*) AS created_count, 0 AS resolved_count
                 FROM issues
-                WHERE created_at >= (SYSTIMESTAMP - NUMTODSINTERVAL(:days, 'DAY'))
-                GROUP BY TRUNC(created_at)
+                WHERE datetime(created_at) >= datetime('now', '-' || :days || ' days')
+                GROUP BY date(created_at)
                 UNION ALL
-                SELECT TRUNC(resolved_at) AS activity_date, 0 AS created_count, COUNT(*) AS resolved_count
+                SELECT date(resolved_at) AS activity_date, 0 AS created_count, COUNT(*) AS resolved_count
                 FROM resolutions
-                WHERE resolved_at >= (SYSTIMESTAMP - NUMTODSINTERVAL(:days, 'DAY'))
-                GROUP BY TRUNC(resolved_at)
+                WHERE datetime(resolved_at) >= datetime('now', '-' || :days || ' days')
+                GROUP BY date(resolved_at)
             ) d
             GROUP BY d.activity_date
             ORDER BY d.activity_date

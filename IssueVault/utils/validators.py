@@ -1,4 +1,4 @@
-"""Validation utilities for IssueVault inputs."""
+"""Validation utilities for ResolveHub inputs."""
 
 from __future__ import annotations
 

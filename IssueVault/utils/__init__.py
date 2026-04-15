@@ -5,6 +5,7 @@ from utils.exceptions import (
     AuthorizationError,
     IssueVaultError,
     NotFoundError,
+    ResolveHubError,
     ValidationError,
 )
 from utils.security import hash_password, verify_password
@@ -14,6 +15,7 @@ __all__ = [
     "AuthorizationError",
     "IssueVaultError",
     "NotFoundError",
+    "ResolveHubError",
     "ValidationError",
     "hash_password",
     "verify_password",

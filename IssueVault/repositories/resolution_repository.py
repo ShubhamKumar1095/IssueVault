@@ -53,7 +53,6 @@ class ResolutionRepository(BaseRepository):
                 :resolved_at,
                 :resolution_minutes
             )
-            RETURNING resolution_id INTO :out_id
         """
         return self.execute_returning_id(
             query,
@@ -80,7 +79,8 @@ class ResolutionRepository(BaseRepository):
                 resolution_steps = :resolution_steps,
                 resolver_id = :resolver_id,
                 resolved_at = :resolved_at,
-                resolution_minutes = :resolution_minutes
+                resolution_minutes = :resolution_minutes,
+                updated_at = CURRENT_TIMESTAMP
             WHERE issue_id = :issue_id
         """
         return self.execute(

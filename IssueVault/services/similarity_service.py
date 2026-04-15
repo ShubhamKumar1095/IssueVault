@@ -36,11 +36,18 @@ class SimilarityService:
             return []
 
         input_text = self._text_blob(title, description)
+        if not input_text:
+            return []
         candidate_texts = [self._text_blob(item.get("title"), item.get("description")) for item in candidates]
 
         # TF-IDF can fail when all documents are empty or stopwords.
         try:
-            vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=1)
+            vectorizer = TfidfVectorizer(
+                stop_words="english",
+                ngram_range=(1, 2),
+                min_df=1,
+                max_features=4000,
+            )
             matrix = vectorizer.fit_transform([input_text, *candidate_texts])
             text_scores = cosine_similarity(matrix[0:1], matrix[1:]).flatten()
         except ValueError:

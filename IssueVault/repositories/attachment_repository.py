@@ -29,7 +29,6 @@ class AttachmentRepository(BaseRepository):
                 :content_type,
                 :uploaded_by
             )
-            RETURNING attachment_id INTO :out_id
         """
         return self.execute_returning_id(
             query,

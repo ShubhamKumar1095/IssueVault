@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 
-class IssueVaultError(Exception):
+class ResolveHubError(Exception):
     """Base application exception."""
 
 
-class ValidationError(IssueVaultError):
+class ValidationError(ResolveHubError):
     """Raised when input validation fails."""
 
 
-class AuthenticationError(IssueVaultError):
+class AuthenticationError(ResolveHubError):
     """Raised when authentication fails."""
 
 
-class AuthorizationError(IssueVaultError):
+class AuthorizationError(ResolveHubError):
     """Raised when user is not allowed to perform operation."""
 
 
-class NotFoundError(IssueVaultError):
+class NotFoundError(ResolveHubError):
     """Raised when entity was not found."""
+
+
+# Backward-compatible alias.
+IssueVaultError = ResolveHubError

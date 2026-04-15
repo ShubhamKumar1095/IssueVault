@@ -4,21 +4,29 @@ from __future__ import annotations
 
 import streamlit as st
 
+from config import get_settings
 from models.enums import RoleEnum
 from services.admin_service import AdminService
-from utils.exceptions import IssueVaultError
+from utils.exceptions import ResolveHubError
 from utils.session import require_login
 
 
-st.set_page_config(page_title="Admin - IssueVault", layout="wide")
+st.set_page_config(page_title="Admin - ResolveHub", layout="wide")
 st.title("Admin")
 st.caption("Manage users, categories, and baseline configuration for the MVP.")
 
 require_login({RoleEnum.ADMIN.value})
 admin_service = AdminService()
 
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _admin_data_cached() -> dict[str, list[dict[str, object]]]:
+    """Cache admin reference datasets."""
+    return AdminService().get_admin_reference_data()
+
+
 try:
-    data = admin_service.get_admin_reference_data()
+    data = _admin_data_cached()
 except Exception as exc:  # pragma: no cover - runtime safety
     st.error(f"Could not load admin data: {exc}")
     st.stop()
@@ -54,9 +62,10 @@ with tab_users:
                 role_name=role_name,
                 team_id=team_options.get(team_name),
             )
+            _admin_data_cached.clear()
             st.success(f"User created with ID {new_user_id}.")
             st.rerun()
-        except IssueVaultError as exc:
+        except ResolveHubError as exc:
             st.error(str(exc))
         except Exception as exc:  # pragma: no cover - runtime safety
             st.error(f"Could not create user: {exc}")
@@ -74,9 +83,10 @@ with tab_categories:
     if create_category_clicked:
         try:
             category_id = admin_service.create_category(category_name, category_description)
+            _admin_data_cached.clear()
             st.success(f"Category created with ID {category_id}.")
             st.rerun()
-        except IssueVaultError as exc:
+        except ResolveHubError as exc:
             st.error(str(exc))
         except Exception as exc:  # pragma: no cover - runtime safety
             st.error(f"Could not create category: {exc}")

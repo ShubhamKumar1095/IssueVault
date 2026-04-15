@@ -1,4 +1,4 @@
-"""Application configuration management for IssueVault."""
+"""Application configuration management for ResolveHub."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _csv_to_list(value: str, default: list[str]) -> list[str]:
 class Settings:
     """Typed settings loaded from environment variables."""
 
-    app_name: str = os.getenv("APP_NAME", "IssueVault")
+    app_name: str = os.getenv("APP_NAME", "ResolveHub")
     app_env: str = os.getenv("APP_ENV", "local")
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "change-this-secret")
 
@@ -35,22 +35,9 @@ class Settings:
         )
     )
 
-    oracle_host: str = os.getenv("ORACLE_HOST", "localhost")
-    oracle_port: int = int(os.getenv("ORACLE_PORT", "1521"))
-    oracle_service_name: str = os.getenv("ORACLE_SERVICE_NAME", "XEPDB1")
-    oracle_dsn: str = os.getenv("ORACLE_DSN", "")
-    oracle_user: str = os.getenv("ORACLE_USER", "")
-    oracle_password: str = os.getenv("ORACLE_PASSWORD", "")
-    oracle_pool_min: int = int(os.getenv("ORACLE_POOL_MIN", "1"))
-    oracle_pool_max: int = int(os.getenv("ORACLE_POOL_MAX", "8"))
-    oracle_pool_increment: int = int(os.getenv("ORACLE_POOL_INCREMENT", "1"))
-
-    @property
-    def dsn(self) -> str:
-        """Build DSN from host/port/service when ORACLE_DSN is not provided."""
-        if self.oracle_dsn:
-            return self.oracle_dsn
-        return f"{self.oracle_host}:{self.oracle_port}/{self.oracle_service_name}"
+    sqlite_db_path: str = os.getenv("SQLITE_DB_PATH", "data/resolvehub.db")
+    sqlite_busy_timeout_ms: int = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "5000"))
+    query_cache_ttl_sec: int = int(os.getenv("QUERY_CACHE_TTL_SEC", "45"))
 
 
 @lru_cache(maxsize=1)

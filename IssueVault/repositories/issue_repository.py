@@ -26,7 +26,6 @@ class IssueRepository(BaseRepository):
         query = """
             INSERT INTO issue_categories (category_name, description, is_active)
             VALUES (:category_name, :description, 'Y')
-            RETURNING category_id INTO :out_id
         """
         return self.execute_returning_id(
             query,
@@ -38,7 +37,7 @@ class IssueRepository(BaseRepository):
         query = """
             SELECT release_id, release_name, release_date, notes
             FROM releases
-            ORDER BY release_date DESC NULLS LAST, release_name
+            ORDER BY release_date DESC, release_name
         """
         return self.fetch_all(query)
 
@@ -50,7 +49,7 @@ class IssueRepository(BaseRepository):
     def get_or_create_tag(self, tag_name: str) -> int:
         """Fetch tag id or create one."""
         existing = self.fetch_one(
-            "SELECT tag_id FROM issue_tags WHERE LOWER(tag_name) = LOWER(:tag_name)",
+            "SELECT tag_id FROM issue_tags WHERE tag_name = :tag_name COLLATE NOCASE",
             {"tag_name": tag_name},
         )
         if existing:
@@ -60,7 +59,6 @@ class IssueRepository(BaseRepository):
             """
             INSERT INTO issue_tags (tag_name)
             VALUES (:tag_name)
-            RETURNING tag_id INTO :out_id
             """,
             {"tag_name": tag_name.lower().strip()},
         )
@@ -68,15 +66,8 @@ class IssueRepository(BaseRepository):
     def add_issue_tag(self, issue_id: int, tag_id: int, created_by: int) -> int:
         """Attach a tag to an issue."""
         query = """
-            MERGE INTO issue_tag_map itm
-            USING (
-                SELECT :issue_id AS issue_id, :tag_id AS tag_id, :created_by AS created_by
-                FROM dual
-            ) src
-            ON (itm.issue_id = src.issue_id AND itm.tag_id = src.tag_id)
-            WHEN NOT MATCHED THEN
-                INSERT (issue_id, tag_id, created_by)
-                VALUES (src.issue_id, src.tag_id, src.created_by)
+            INSERT OR IGNORE INTO issue_tag_map (issue_id, tag_id, created_by)
+            VALUES (:issue_id, :tag_id, :created_by)
         """
         return self.execute(
             query,
@@ -121,7 +112,6 @@ class IssueRepository(BaseRepository):
                 :assigned_to,
                 :release_id
             )
-            RETURNING issue_id INTO :out_id
         """
         return self.execute_returning_id(
             query,
@@ -186,12 +176,20 @@ class IssueRepository(BaseRepository):
 
     def update_issue_status(self, issue_id: int, new_status: str) -> int:
         """Update issue status only."""
-        query = "UPDATE issues SET status = :new_status WHERE issue_id = :issue_id"
+        query = """
+            UPDATE issues
+            SET status = :new_status, updated_at = CURRENT_TIMESTAMP
+            WHERE issue_id = :issue_id
+        """
         return self.execute(query, {"issue_id": issue_id, "new_status": new_status})
 
     def assign_issue(self, issue_id: int, assigned_to: int | None) -> int:
         """Assign or unassign an issue."""
-        query = "UPDATE issues SET assigned_to = :assigned_to WHERE issue_id = :issue_id"
+        query = """
+            UPDATE issues
+            SET assigned_to = :assigned_to, updated_at = CURRENT_TIMESTAMP
+            WHERE issue_id = :issue_id
+        """
         return self.execute(query, {"issue_id": issue_id, "assigned_to": assigned_to})
 
     def get_issue_by_id(self, issue_id: int) -> dict[str, Any] | None:
@@ -277,17 +275,17 @@ class IssueRepository(BaseRepository):
         params: dict[str, Any] = {}
 
         if filters.keyword:
-            query += " AND (LOWER(i.title) LIKE :keyword OR LOWER(i.description) LIKE :keyword)"
-            params["keyword"] = f"%{filters.keyword.lower()}%"
+            query += " AND (i.title LIKE :keyword COLLATE NOCASE OR i.description LIKE :keyword COLLATE NOCASE)"
+            params["keyword"] = f"%{filters.keyword}%"
         if filters.title:
-            query += " AND LOWER(i.title) LIKE :title"
-            params["title"] = f"%{filters.title.lower()}%"
+            query += " AND i.title LIKE :title COLLATE NOCASE"
+            params["title"] = f"%{filters.title}%"
         if filters.error_code:
-            query += " AND LOWER(i.error_code) = :error_code"
-            params["error_code"] = filters.error_code.lower()
+            query += " AND i.error_code = :error_code COLLATE NOCASE"
+            params["error_code"] = filters.error_code
         if filters.module_name:
-            query += " AND LOWER(i.module_name) = :module_name"
-            params["module_name"] = filters.module_name.lower()
+            query += " AND i.module_name = :module_name COLLATE NOCASE"
+            params["module_name"] = filters.module_name
         if filters.severity:
             query += " AND i.severity = :severity"
             params["severity"] = filters.severity
@@ -304,13 +302,13 @@ class IssueRepository(BaseRepository):
             query += " AND i.reported_by = :reported_by"
             params["reported_by"] = filters.reported_by
         if filters.created_from:
-            query += " AND i.created_at >= :created_from"
-            params["created_from"] = filters.created_from
+            query += " AND date(i.created_at) >= date(:created_from)"
+            params["created_from"] = filters.created_from.isoformat()
         if filters.created_to:
-            query += " AND i.created_at < (:created_to + 1)"
-            params["created_to"] = filters.created_to
+            query += " AND date(i.created_at) <= date(:created_to)"
+            params["created_to"] = filters.created_to.isoformat()
 
-        query += " ORDER BY i.created_at DESC"
+        query += " ORDER BY i.created_at DESC LIMIT 500"
         return self.fetch_all(query, params)
 
     def create_issue_link(
@@ -352,44 +350,41 @@ class IssueRepository(BaseRepository):
         """
         return self.fetch_all(query, {"issue_id": issue_id})
 
-    def list_similarity_candidates(self, max_rows: int = 1000) -> list[dict[str, Any]]:
+    def list_similarity_candidates(self, max_rows: int = 500) -> list[dict[str, Any]]:
         """
         Return issue records used by similarity ranking.
 
         Includes average rating and helpfulness ratio for ranking boost.
         """
         query = """
-            SELECT *
-            FROM (
-                SELECT
-                    i.issue_id,
-                    i.title,
-                    i.description,
-                    i.module_name,
-                    i.error_code,
-                    i.status,
-                    ic.category_name,
-                    NVL(AVG(sf.rating), 0) AS avg_rating,
-                    NVL(
-                        SUM(CASE WHEN sf.is_helpful = 'Y' THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(sf.feedback_id), 0),
-                        0
-                    ) AS helpful_ratio,
-                    ROW_NUMBER() OVER (ORDER BY i.created_at DESC) AS rn
-                FROM issues i
-                JOIN issue_categories ic ON ic.category_id = i.category_id
-                LEFT JOIN solution_feedback sf ON sf.issue_id = i.issue_id
-                GROUP BY
-                    i.issue_id,
-                    i.title,
-                    i.description,
-                    i.module_name,
-                    i.error_code,
-                    i.status,
-                    ic.category_name,
-                    i.created_at
-            )
-            WHERE rn <= :max_rows
+            SELECT
+                i.issue_id,
+                i.title,
+                i.description,
+                i.module_name,
+                i.error_code,
+                i.status,
+                ic.category_name,
+                COALESCE(AVG(sf.rating), 0) AS avg_rating,
+                COALESCE(
+                    (1.0 * SUM(CASE WHEN sf.is_helpful = 'Y' THEN 1 ELSE 0 END))
+                    / NULLIF(COUNT(sf.feedback_id), 0),
+                    0
+                ) AS helpful_ratio
+            FROM issues i
+            JOIN issue_categories ic ON ic.category_id = i.category_id
+            LEFT JOIN solution_feedback sf ON sf.issue_id = i.issue_id
+            GROUP BY
+                i.issue_id,
+                i.title,
+                i.description,
+                i.module_name,
+                i.error_code,
+                i.status,
+                ic.category_name,
+                i.created_at
+            ORDER BY i.created_at DESC
+            LIMIT :max_rows
         """
         return self.fetch_all(query, {"max_rows": max_rows})
 

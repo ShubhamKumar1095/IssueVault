@@ -1,4 +1,4 @@
-"""Enumerations used across IssueVault."""
+"""Enumerations used across ResolveHub."""
 
 from __future__ import annotations
 

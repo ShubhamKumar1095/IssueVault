@@ -6,19 +6,37 @@ from datetime import date
 
 import streamlit as st
 
+from config import get_settings
 from models.schemas import IssueSearchFilters
 from services.issue_service import IssueService
-from utils.exceptions import IssueVaultError
+from utils.exceptions import ResolveHubError
 from utils.session import require_login
 
 
-st.set_page_config(page_title="Search Issues - IssueVault", layout="wide")
+st.set_page_config(page_title="Search Issues - ResolveHub", layout="wide")
 st.title("Search Issues")
 st.caption("Use multi-field filters to find historical issues and resolution memory.")
 
 current_user = require_login()
 issue_service = IssueService()
-metadata = issue_service.get_submission_metadata()
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _load_search_metadata() -> dict[str, list[dict[str, object]]]:
+    """Cache metadata shared by issue-search controls."""
+    return IssueService().get_submission_metadata()
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _load_issue_bundle_cached(issue_id: int, viewer_user_id: int, viewer_role: str) -> dict[str, object]:
+    """Cache issue detail bundle for smoother drill-down UX."""
+    return IssueService().get_issue_bundle(
+        issue_id=issue_id,
+        viewer_user={"user_id": viewer_user_id, "role_name": viewer_role},
+    )
+
+
+metadata = _load_search_metadata()
 
 category_options = {"All": None}
 for row in metadata["categories"]:
@@ -82,7 +100,7 @@ if search_clicked:
     )
     try:
         st.session_state["search_results"] = issue_service.search_issues(filters, current_user)
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Search failed: {exc}")
@@ -107,8 +125,12 @@ selected_label = st.selectbox("Select Issue", list(options.keys()))
 selected_issue_id = options[selected_label]
 
 try:
-    bundle = issue_service.get_issue_bundle(selected_issue_id, current_user)
-except IssueVaultError as exc:
+    bundle = _load_issue_bundle_cached(
+        issue_id=selected_issue_id,
+        viewer_user_id=int(current_user["user_id"]),
+        viewer_role=str(current_user["role_name"]),
+    )
+except ResolveHubError as exc:
     st.error(str(exc))
     st.stop()
 except Exception as exc:  # pragma: no cover - runtime safety

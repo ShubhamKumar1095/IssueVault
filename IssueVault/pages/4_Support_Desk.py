@@ -6,15 +6,16 @@ from datetime import datetime
 
 import streamlit as st
 
+from config import get_settings
 from models.enums import IssueStatusEnum, LinkTypeEnum, RoleEnum
 from models.schemas import IssueSearchFilters, ResolutionInput
 from services.issue_service import IssueService
 from services.resolution_service import ResolutionService
-from utils.exceptions import IssueVaultError
+from utils.exceptions import ResolveHubError
 from utils.session import require_login
 
 
-st.set_page_config(page_title="Support Desk - IssueVault", layout="wide")
+st.set_page_config(page_title="Support Desk - ResolveHub", layout="wide")
 st.title("Support Desk")
 st.caption("Triage, assign, collaborate, link related issues, and capture resolutions.")
 
@@ -28,10 +29,39 @@ current_user = require_login(
 
 issue_service = IssueService()
 resolution_service = ResolutionService()
-metadata = issue_service.get_submission_metadata()
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _support_metadata_cached() -> dict[str, list[dict[str, object]]]:
+    """Cache support desk reference data."""
+    return IssueService().get_submission_metadata()
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _support_issue_queue_cached(user_id: int, role_name: str) -> list[dict[str, object]]:
+    """Cache support desk issue queue results."""
+    return IssueService().search_issues(
+        filters=IssueSearchFilters(),
+        user={"user_id": user_id, "role_name": role_name},
+    )
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _support_issue_bundle_cached(issue_id: int, user_id: int, role_name: str) -> dict[str, object]:
+    """Cache support issue details."""
+    return IssueService().get_issue_bundle(
+        issue_id=issue_id,
+        viewer_user={"user_id": user_id, "role_name": role_name},
+    )
+
+
+metadata = _support_metadata_cached()
 
 try:
-    all_issues = issue_service.search_issues(IssueSearchFilters(), current_user)
+    all_issues = _support_issue_queue_cached(
+        user_id=int(current_user["user_id"]),
+        role_name=str(current_user["role_name"]),
+    )
 except Exception as exc:  # pragma: no cover - runtime safety
     st.error(f"Could not load issue queue: {exc}")
     st.stop()
@@ -61,8 +91,12 @@ selected_label = st.selectbox("Select Issue", list(issue_options.keys()))
 issue_id = issue_options[selected_label]
 
 try:
-    bundle = issue_service.get_issue_bundle(issue_id, current_user)
-except IssueVaultError as exc:
+    bundle = _support_issue_bundle_cached(
+        issue_id=issue_id,
+        user_id=int(current_user["user_id"]),
+        role_name=str(current_user["role_name"]),
+    )
+except ResolveHubError as exc:
     st.error(str(exc))
     st.stop()
 except Exception as exc:  # pragma: no cover - runtime safety
@@ -105,9 +139,11 @@ if update_clicked:
             actor_user=current_user,
             notes=status_note.strip() or None,
         )
+        _support_issue_queue_cached.clear()
+        _support_issue_bundle_cached.clear()
         st.success("Issue assignment/status updated.")
         st.rerun()
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not update issue: {exc}")
@@ -125,9 +161,10 @@ if comment_clicked:
             comment_text=comment_text,
             is_internal=is_internal,
         )
+        _support_issue_bundle_cached.clear()
         st.success("Comment added.")
         st.rerun()
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not add comment: {exc}")
@@ -146,9 +183,10 @@ if link_clicked and linked_label:
             link_type=link_type,
             actor_user=current_user,
         )
+        _support_issue_bundle_cached.clear()
         st.success("Issue link created.")
         st.rerun()
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not link issue: {exc}")
@@ -175,9 +213,11 @@ if resolve_clicked:
             resolved_at=datetime.now(),
         )
         resolution_service.upsert_resolution(payload=payload, actor_user=current_user, status_note="Resolved by Support Desk.")
+        _support_issue_queue_cached.clear()
+        _support_issue_bundle_cached.clear()
         st.success("Resolution saved and status updated to Resolved.")
         st.rerun()
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not save resolution: {exc}")

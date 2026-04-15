@@ -28,7 +28,7 @@ class UserRepository(BaseRepository):
             FROM users u
             JOIN roles r ON r.role_id = u.role_id
             LEFT JOIN teams t ON t.team_id = u.team_id
-            WHERE LOWER(u.username) = LOWER(:username)
+            WHERE u.username = :username COLLATE NOCASE
         """
         return self.fetch_one(query, {"username": username})
 
@@ -110,7 +110,6 @@ class UserRepository(BaseRepository):
                 :team_id,
                 :is_active
             )
-            RETURNING user_id INTO :out_id
         """
         return self.execute_returning_id(
             query,
@@ -127,7 +126,7 @@ class UserRepository(BaseRepository):
 
     def update_last_login(self, user_id: int) -> int:
         """Set user's last_login_at timestamp."""
-        query = "UPDATE users SET last_login_at = SYSTIMESTAMP WHERE user_id = :user_id"
+        query = "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE user_id = :user_id"
         return self.execute(query, {"user_id": user_id})
 
     def list_roles(self) -> list[dict[str, Any]]:

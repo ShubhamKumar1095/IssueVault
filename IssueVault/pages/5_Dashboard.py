@@ -5,20 +5,27 @@ from __future__ import annotations
 import plotly.express as px
 import streamlit as st
 
+from config import get_settings
 from models.enums import RoleEnum
 from services.dashboard_service import DashboardService
 from utils.session import require_login
 
 
-st.set_page_config(page_title="Dashboard - IssueVault", layout="wide")
+st.set_page_config(page_title="Dashboard - ResolveHub", layout="wide")
 st.title("Dashboard")
 st.caption("Operational metrics for issue flow, recurrence, and resolution effectiveness.")
 
 require_login({RoleEnum.MANAGER.value, RoleEnum.ADMIN.value})
-dashboard_service = DashboardService()
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _dashboard_payload_cached() -> dict[str, object]:
+    """Cache dashboard dataset payload for snappier rendering."""
+    return DashboardService().get_dashboard_payload()
+
 
 try:
-    payload = dashboard_service.get_dashboard_payload()
+    payload = _dashboard_payload_cached()
 except Exception as exc:  # pragma: no cover - runtime safety
     st.error(f"Could not load dashboard data: {exc}")
     st.stop()
@@ -31,12 +38,12 @@ c3.metric("Avg Resolution (min)", f"{kpis['avg_resolution_minutes']:.1f}")
 c4.metric("Reopen Rate", f"{kpis['reopen_rate_pct']:.1f}%")
 c5.metric("Duplicate Issues Avoided", kpis["duplicate_issues_avoided"])
 
-status_df = payload["status_distribution"]
-top_categories_df = payload["top_categories"]
-top_modules_df = payload["top_modules"]
-resolution_trend_df = payload["resolution_trend"]
-resolved_vs_open_df = payload["resolved_vs_open"]
-helpful_df = payload["helpful_solutions"]
+status_df = payload["status_distribution"].copy()
+top_categories_df = payload["top_categories"].copy()
+top_modules_df = payload["top_modules"].copy()
+resolution_trend_df = payload["resolution_trend"].copy()
+resolved_vs_open_df = payload["resolved_vs_open"].copy()
+helpful_df = payload["helpful_solutions"].copy()
 
 row1_col1, row1_col2 = st.columns(2)
 with row1_col1:

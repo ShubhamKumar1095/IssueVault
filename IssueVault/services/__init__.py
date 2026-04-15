@@ -1,4 +1,4 @@
-"""Business service layer for IssueVault."""
+"""Business service layer for ResolveHub."""
 
 from services.admin_service import AdminService
 from services.auth_service import AuthService

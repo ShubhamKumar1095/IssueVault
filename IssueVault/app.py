@@ -1,4 +1,4 @@
-"""IssueVault Streamlit entrypoint and login page."""
+"""ResolveHub Streamlit entrypoint and login page."""
 
 from __future__ import annotations
 
@@ -9,8 +9,14 @@ import streamlit as st
 from config import get_settings
 from services.auth_service import AuthService
 from services.issue_service import IssueService
-from utils.exceptions import IssueVaultError
+from utils.exceptions import ResolveHubError
 from utils.session import clear_current_user, get_current_user, set_current_user
+
+
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _home_my_issues_cached(user_id: int, role_name: str) -> list[dict[str, object]]:
+    """Cache home-page snapshot query."""
+    return IssueService().list_my_issues({"user_id": user_id, "role_name": role_name})
 
 
 def _render_login(auth_service: AuthService) -> None:
@@ -27,7 +33,7 @@ def _render_login(auth_service: AuthService) -> None:
             set_current_user(asdict(user))
             st.success(f"Welcome, {user.full_name}.")
             st.rerun()
-        except IssueVaultError as exc:
+        except ResolveHubError as exc:
             st.error(str(exc))
         except Exception as exc:  # pragma: no cover - runtime safety
             st.error(f"Unable to login: {exc}")
@@ -51,9 +57,11 @@ def _render_home(current_user: dict[str, object]) -> None:
         "- Admin"
     )
 
-    issue_service = IssueService()
     try:
-        my_issues = issue_service.list_my_issues(current_user)
+        my_issues = _home_my_issues_cached(
+            user_id=int(current_user["user_id"]),
+            role_name=str(current_user["role_name"]),
+        )
     except Exception as exc:  # pragma: no cover - runtime safety
         st.warning(f"Could not load your issues: {exc}")
         my_issues = []
@@ -67,7 +75,7 @@ def _render_home(current_user: dict[str, object]) -> None:
 
 
 def main() -> None:
-    """Render IssueVault app home."""
+    """Render ResolveHub app home."""
     settings = get_settings()
     st.set_page_config(page_title=settings.app_name, page_icon=":bookmark_tabs:", layout="wide")
 

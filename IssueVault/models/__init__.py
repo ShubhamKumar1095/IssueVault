@@ -1,4 +1,4 @@
-"""Schema and enum models for IssueVault."""
+"""Schema and enum models for ResolveHub."""
 
 from models.enums import (
     IssueStatusEnum,

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import streamlit as st
 
+from config import get_settings
 from models.enums import PriorityEnum, RoleEnum, SeverityEnum
 from models.schemas import IssueSubmissionInput
 from services.issue_service import IssueService
-from utils.exceptions import IssueVaultError
+from utils.exceptions import ResolveHubError
 from utils.session import require_login
 
 
-st.set_page_config(page_title="Submit Issue - IssueVault", layout="wide")
+st.set_page_config(page_title="Submit Issue - ResolveHub", layout="wide")
 st.title("Submit Issue")
 st.caption("Capture structured issue details and detect similar historical issues before save.")
 
@@ -24,8 +25,14 @@ current_user = require_login(
     }
 )
 
+@st.cache_data(ttl=get_settings().query_cache_ttl_sec, show_spinner=False)
+def _load_submission_metadata() -> dict[str, list[dict[str, object]]]:
+    """Cache reference data used by the submission form."""
+    return IssueService().get_submission_metadata()
+
+
 issue_service = IssueService()
-metadata = issue_service.get_submission_metadata()
+metadata = _load_submission_metadata()
 
 category_options = {row["category_name"]: int(row["category_id"]) for row in metadata["categories"]}
 release_options = {"None": None}
@@ -106,7 +113,7 @@ if check_similar_clicked:
             st.info("No similar issues found in current history.")
         else:
             st.dataframe(similar, use_container_width=True, hide_index=True)
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not run similarity check: {exc}")
@@ -114,10 +121,11 @@ if check_similar_clicked:
 if submit_clicked:
     try:
         result = issue_service.submit_issue(payload, reporter_user=current_user, uploaded_files=attachments)
+        _load_submission_metadata.clear()
         st.success(f"Issue #{result['issue_id']} submitted successfully.")
         if result["attachments"]:
             st.caption(f"Saved {len(result['attachments'])} attachment(s).")
-    except IssueVaultError as exc:
+    except ResolveHubError as exc:
         st.error(str(exc))
     except Exception as exc:  # pragma: no cover - runtime safety
         st.error(f"Could not submit issue: {exc}")
